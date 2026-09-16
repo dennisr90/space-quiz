@@ -186,6 +186,24 @@
       text-transform: uppercase;
     }
 
+    .brand-meta {
+      display: grid;
+      justify-items: end;
+      gap: 6px;
+    }
+
+    .brand-best {
+      border: 1px solid color-mix(in srgb, var(--primary), transparent 65%);
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: var(--primary);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
     .status-light {
       width: 7px;
       height: 7px;
@@ -407,6 +425,18 @@
       color: var(--muted);
     }
 
+    .result-best {
+      margin: 0 0 10px;
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .result-celebration {
+      margin: 0 auto 16px;
+      color: var(--correct);
+      font-weight: 800;
+    }
+
     @keyframes shake {
       0%, 100% { transform: translateX(0); }
       20% { transform: translateX(-9px); }
@@ -462,6 +492,16 @@
         padding: 16px 12px;
       }
 
+      .brand {
+        grid-template-columns: auto 1fr;
+        row-gap: 8px;
+      }
+
+      .brand-meta {
+        grid-column: 1 / -1;
+        justify-items: start;
+      }
+
       .brand-status {
         padding-inline: 7px;
       }
@@ -480,7 +520,10 @@
         <span class="brand-kicker">Mission control</span>
         <span class="brand-title">Orbit Quest</span>
       </span>
-      <span class="brand-status" aria-hidden="true"><span class="status-light"></span>Online</span>
+      <span class="brand-meta">
+        <span class="brand-status" aria-hidden="true"><span class="status-light"></span>Online</span>
+        <span class="brand-best" id="best-score-label" aria-live="polite">Best ★ —</span>
+      </span>
     </header>
     <section class="card" id="quiz-card" aria-live="polite">
       <div id="quiz-screen">
@@ -502,6 +545,8 @@
         <p class="eyebrow">Mission complete</p>
         <h2 id="result-title">Stellar work!</h2>
         <p class="result-score" id="result-score"></p>
+        <p class="result-best" id="result-best"></p>
+        <p class="result-celebration" id="result-celebration" role="status" aria-live="polite" hidden></p>
         <p class="result-message" id="result-message"></p>
         <button class="next-button" id="restart-button" type="button">Launch again ↻</button>
       </div>
@@ -582,6 +627,46 @@
       }
     ];
 
+    const BEST_SCORE_KEY = "orbit-quest-best-score";
+
+    function getBrowserStorage() {
+      try {
+        return window.localStorage;
+      } catch {
+        return null;
+      }
+    }
+
+    function createBestScoreStore(storageKey, storage = getBrowserStorage()) {
+      return {
+        read() {
+          if (!storage) return null;
+          try {
+            const value = Number.parseInt(storage.getItem(storageKey), 10);
+            return Number.isNaN(value) || value < 0 ? null : value;
+          } catch {
+            return null;
+          }
+        },
+        write(value) {
+          if (!storage) return false;
+          try {
+            storage.setItem(storageKey, String(value));
+            return true;
+          } catch {
+            return false;
+          }
+        }
+      };
+    }
+
+    function updateBestScore(previousBest, latestScore) {
+      if (previousBest === null || latestScore > previousBest) {
+        return latestScore;
+      }
+      return previousBest;
+    }
+
     const elements = {
       quizScreen: document.querySelector("#quiz-screen"),
       resultsScreen: document.querySelector("#results-screen"),
@@ -598,18 +683,36 @@
       reaction: document.querySelector("#reaction"),
       resultTitle: document.querySelector("#result-title"),
       resultScore: document.querySelector("#result-score"),
-      resultMessage: document.querySelector("#result-message")
+      resultMessage: document.querySelector("#result-message"),
+      resultBest: document.querySelector("#result-best"),
+      resultCelebration: document.querySelector("#result-celebration"),
+      bestScoreLabel: document.querySelector("#best-score-label")
     };
+
+    const bestScoreStore = createBestScoreStore(BEST_SCORE_KEY);
 
     let currentQuestion = 0;
     let score = 0;
+    let bestScore = bestScoreStore.read();
     let answered = false;
+
+    function renderBestScoreLabel() {
+      const display = bestScore === null ? "—" : `${bestScore}/${questions.length}`;
+      elements.bestScoreLabel.textContent = `Best ★ ${display}`;
+      elements.bestScoreLabel.setAttribute(
+        "aria-label",
+        bestScore === null
+          ? "Best score not set yet"
+          : `Best score ${bestScore} out of ${questions.length}`
+      );
+    }
 
     function renderQuestion() {
       const item = questions[currentQuestion];
       answered = false;
       elements.count.textContent = `Question ${currentQuestion + 1} of ${questions.length}`;
       elements.score.textContent = score;
+      renderBestScoreLabel();
       elements.progressBar.style.width = `${((currentQuestion + 1) / questions.length) * 100}%`;
       elements.progress.setAttribute("aria-valuenow", currentQuestion + 1);
       elements.category.textContent = item.category;
@@ -660,6 +763,14 @@
     function showResults() {
       const percentage = Math.round((score / questions.length) * 100);
       let result;
+      const previousBest = bestScore;
+      const nextBest = updateBestScore(previousBest, score);
+      const isNewBest = previousBest !== null ? score > previousBest : score > 0;
+
+      if (nextBest !== previousBest) {
+        bestScore = nextBest;
+        bestScoreStore.write(bestScore);
+      }
 
       if (score >= 9) {
         result = ["🌟", "Cosmic genius!", "Your space knowledge is truly out of this world."];
@@ -676,7 +787,11 @@
       elements.reaction.textContent = result[0];
       elements.resultTitle.textContent = result[1];
       elements.resultScore.textContent = `${score} / ${questions.length} correct · ${percentage}%`;
+      elements.resultBest.textContent = `Personal best: ${bestScore} / ${questions.length}`;
+      elements.resultCelebration.hidden = !isNewBest;
+      elements.resultCelebration.textContent = isNewBest ? `✨ New personal best: ${score} / ${questions.length}!` : "";
       elements.resultMessage.textContent = result[2];
+      renderBestScoreLabel();
       elements.restart.focus({ preventScroll: true });
     }
 
@@ -697,7 +812,51 @@
       renderQuestion();
     });
 
+    function runBestScoreTrackerTests() {
+      function assert(condition, message) {
+        if (!condition) {
+          throw new Error(message);
+        }
+      }
+
+      function memoryStorage() {
+        const store = {};
+        return {
+          getItem(key) {
+            return Object.prototype.hasOwnProperty.call(store, key) ? store[key] : null;
+          },
+          setItem(key, value) {
+            store[key] = String(value);
+          }
+        };
+      }
+
+      const fakeStorage = memoryStorage();
+      const testStore = createBestScoreStore("test-best-score", fakeStorage);
+      assert(testStore.read() === null, "Expected null before first write");
+      assert(testStore.write(6) === true, "Expected write to succeed");
+      assert(testStore.read() === 6, "Expected persisted best score to be 6");
+      assert(updateBestScore(6, 4) === 6, "Lower score should not replace best");
+      assert(updateBestScore(6, 9) === 9, "Higher score should replace best");
+      assert(updateBestScore(null, 3) === 3, "First completed score should seed best");
+
+      const unavailableStore = createBestScoreStore("test-best-score", null);
+      assert(unavailableStore.read() === null, "Unavailable storage read should return null");
+      assert(unavailableStore.write(5) === false, "Unavailable storage write should fail safely");
+
+      const result = document.createElement("p");
+      result.textContent = "Best score tracker tests passed.";
+      result.style.marginTop = "12px";
+      result.style.color = "var(--correct)";
+      result.style.fontWeight = "700";
+      document.querySelector("#quiz-card").appendChild(result);
+    }
+
     renderQuestion();
+
+    if (new URLSearchParams(window.location.search).has("runTests")) {
+      runBestScoreTrackerTests();
+    }
   </script>
 </body>
 </html>
